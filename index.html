@@ -1,0 +1,194 @@
+﻿<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+	<meta charset="utf-8" />
+	<script src="stuff/bUtils.js"></script>
+	<script src="stuff/bUtilsBrowser.js"></script>
+	<link rel="stylesheet" type="text/css" href="stuff/btStyle.css">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Music Visualizer</title>
+	<script>
+		/** @type {CanvasUtil} */
+		var ctx = null
+		var recorder = null
+
+		var atx = new AudioContext()
+		var player = atx.createBufferSource();
+		/** @type {MediaStreamAudioSourceNode} */
+		var micSrc = null;
+		var analyser = atx.createAnalyser()
+		var recordingDest = atx.createMediaStreamDestination()
+		analyser.connect(atx.destination)
+		analyser.connect(recordingDest)
+
+		function setup() {
+			player.connect(analyser)
+			ctx = E.drawer.toCtx()
+			loadSettings()
+			navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+				micSrc = atx.createMediaStreamSource(stream)
+				useMic();
+			})
+		}
+
+		var bgColor = colors.notepad
+		var lineColor = colors.white
+		var precision = 256
+		var length = 300
+		var mirror = 1
+		var min = 0.2
+		var spectogramEnabled = true;
+		var useLogScale = true
+		var resolution = [1920, 1080]
+		var spectogramHistory = new ImageData(1, 1)
+		function loadSettings() {
+			bgColor = colors.fromHex(E.bgColor.value);
+			lineColor = colors.fromHex(E.fgColor.value);
+			length = parseFloat(E.lineLength.value).notNaN()
+			resolution[0] = parseInt(E.width.value).notNaN()
+			resolution[1] = parseInt(E.height.value).notNaN()
+			ctx.setSize(resolution)
+			ctx.canvas.canvas.setSize(resolution.mul(1 / (resolution[0] / 700)))
+		}
+
+		function useMic() {
+			if (micSrc) {
+				if (E.useMic.checked) {
+					micSrc.connect(analyser)
+				} else {
+					micSrc.disconnect()
+				}
+			}
+		}
+
+		var duration = 0
+		function loadFile() {
+			if (E.fileSource.files.length < 1) return
+			var file = E.fileSource.files[0];
+			var reader = new FileReader()
+			reader.onload = () => {
+				atx.decodeAudioData(reader.result).then((buffer) => {
+					player.disconnect()
+					player = atx.createBufferSource()
+					player.connect(analyser)
+					player.buffer = buffer
+					duration = buffer.duration
+					started = Infinity
+				})
+			}
+			reader.readAsArrayBuffer(file)
+
+		}
+
+		var started = Infinity;
+		function start() {
+			spectogramHistory = new ImageData(1, 1)
+			player.start()
+			started = atx.currentTime
+			E.useMic.checked = false;
+			useMic()
+		}
+
+		function update() {
+			E.playProgress.value = Math.clamp((atx.currentTime - started) / duration, 0, 1).notNaN()
+
+			var indexTrans = (frac) => {
+				if (!useLogScale) {
+					return Math.floor(frac * data.length)
+				} else {
+					return Math.floor((Math.pow(10, frac) - 1) / (10 - 1) * data.length)
+				}
+			}
+
+			ctx.setColor(bgColor).fill()
+			var middle = ctx.getSize().mul(0.5);
+			var data = new Float32Array(analyser.fftSize / 2)
+			analyser.getFloatFrequencyData(data)
+			debug = data
+			if (spectogramEnabled) {
+				let line = new ImageData(1, precision)
+				for (var i = 0; i < line.height; i++) {
+					let index = Math.floor(indexTrans(i / line.height))
+					let frac = Math.clamp(1 - (-data[index] / 60), 0, 1)
+					line.setPixel([0, i], bgColor.lerp(lineColor, frac))
+				}
+				let created = CanvasUtil.virtual([1, precision])
+				created.load(line, [0, 0])
+				ctx.load(created.canvas.canvas, [0, 0], [1, ctx.getSize()[1]])
+				ctx.load(spectogramHistory, [1, 0])
+
+				spectogramHistory = ctx.getImageData()
+			}
+
+
+			ctx.setColor(lineColor);
+			repeat(precision - 1, (i) => {
+				v = 1 / precision * i
+				//v = v - (1 / precision)
+				var mul
+				if (mirror) {
+					if (v < 0.5) mul = data[Math.floor(indexTrans(v * 2)) % data.length]
+					else mul = data[Math.floor(indexTrans((1 - (v + 1 / precision)) * 2)) % data.length]
+				} else mul = data[Math.floor(indexTrans(v)) % data.length]
+				var end = vector.fromAngle(Math.PI * 2 * v).mul(Math.clamp(length * (1 - (-mul / 60) + min), 0, length))//Math.floor(v * data.length) % data.length],0,length))
+				ctx.line(middle, end.add(middle))
+			})
+
+			if (recorder && (atx.currentTime - started) > duration + 1) recorder.stop()
+		}
+
+		function stop() {
+			spectogramHistory = new ImageData(1, 1)
+			player.stop()
+			started = Infinity;
+		}
+
+		/** @type {MediaStream} */
+		var canvasStream = null
+		var blobData = []
+		function record() {
+			start()
+			canvasStream = ctx.canvas.canvas.captureStream(30)
+			var tracks = recordingDest.stream.getAudioTracks()
+			tracks.forEach((v) => canvasStream.addTrack(v))
+			
+			recorder = new MediaRecorder(canvasStream, { type: "video/webm" })
+			recorder.ondataavailable = (e) => {
+				blobData.push(e.data)
+			}
+			recorder.start()
+
+			recorder.onstop = () => {
+				var fullBlob = new Blob(blobData, { type: "video/webm" })
+				var url = URL.createObjectURL(fullBlob)
+				E.output.src = url;
+				recorder = null;
+			}
+		}
+	</script>
+</head>
+<body style="display: flex; flex-direction: column; margin: 0">
+	<div style="flex: 0 1; display: flex; flex-direction: row">
+		<div style="flex: 0 1; padding: 4px">
+			<canvas style="border: groove 1px lightgrey;" id="drawer"></canvas>
+		</div>
+		<div style="flex: 1 1; padding: 4px">
+			Background: <input type="color" id="bgColor" value="#0b161d" onchange="loadSettings()" /><br />
+			Foreground: <input type="color" id="fgColor" value="#ffffff" onchange="loadSettings()" /><br />
+			Length: <input type="number" id="lineLength" oninput="loadSettings()" value="300" /><br />
+			Width: <input type="number" id="width" oninput="loadSettings()" value="1920" /><br />
+			Height: <input type="number" id="height" oninput="loadSettings()" value="1080" /><br />
+			File: <input type="file" accept="audio/*" id="fileSource" onchange="loadFile()" /><br />
+			Microphone: <input type="checkbox" id="useMic" onchange="useMic()" checked /><br />
+			<button onclick="atx.resume()">Click if audio missing</button><br />
+			<button onclick="start()">></button><button onclick="record()">O</button><button onclick="stop()">C</button><br />
+
+		</div>
+		<div style="flex: 0 1; padding: 4px">
+			<video id="output" controls style="max-width: 500px"></video>
+		</div>
+	</div>
+	<progress id="playProgress" max="1" value="0" style="width:auto; margin-left: 10px; margin-right: 10px"></progress>
+
+</body>
+</html>
