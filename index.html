@@ -61,9 +61,11 @@
 			}
 		}
 
+		var fileName = ""
 		var duration = 0
 		function loadFile() {
 			if (E.fileSource.files.length < 1) return
+			/** @type {File} */
 			var file = E.fileSource.files[0];
 			var reader = new FileReader()
 			reader.onload = () => {
@@ -74,6 +76,7 @@
 					player.buffer = buffer
 					duration = buffer.duration
 					started = Infinity
+					fileName = file.name
 				})
 			}
 			reader.readAsArrayBuffer(file)
@@ -162,7 +165,10 @@
 				var fullBlob = new Blob(blobData, { type: "video/webm" })
 				var url = URL.createObjectURL(fullBlob)
 				E.output.src = url;
+				E.download.href = url;
+				E.download.download = fileName + ".webm"
 				recorder = null;
+
 			}
 		}
 	</script>
@@ -186,6 +192,7 @@
 		</div>
 		<div style="flex: 0 1; padding: 4px">
 			<video id="output" controls style="max-width: 500px"></video>
+			<a id="download">Download</a>
 		</div>
 	</div>
 	<progress id="playProgress" max="1" value="0" style="width:auto; margin-left: 10px; margin-right: 10px"></progress>
