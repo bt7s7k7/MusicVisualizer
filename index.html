@@ -40,7 +40,8 @@
 		var spectogramEnabled = true;
 		var useLogScale = true
 		var resolution = [1920, 1080]
-		var spectogramHistory = new ImageData(1, 1)
+		/** @type {CanvasUtil} */
+		var spectogramHistory = null
 		function loadSettings() {
 			bgColor = colors.fromHex(E.bgColor.value);
 			lineColor = colors.fromHex(E.fgColor.value);
@@ -85,7 +86,7 @@
 
 		var started = Infinity;
 		function start() {
-			spectogramHistory = new ImageData(1, 1)
+			if (spectogramHistory) spectogramHistory.clear()
 			player.start()
 			started = atx.currentTime
 			E.useMic.checked = false;
@@ -118,9 +119,11 @@
 				let created = CanvasUtil.virtual([1, precision])
 				created.load(line, [0, 0])
 				ctx.load(created.canvas.canvas, [0, 0], [1, ctx.getSize()[1]])
-				ctx.load(spectogramHistory, [1, 0])
+				if (spectogramHistory) ctx.load(spectogramHistory.canvas.canvas, [1, 0], spectogramHistory.getSize())
+				else spectogramHistory = CanvasUtil.virtual(ctx.getSize())
 
-				spectogramHistory = ctx.getImageData()
+				spectogramHistory.setSize(ctx.getSize())
+				spectogramHistory.load(ctx.canvas.canvas, [0,0], ctx.getSize())
 			}
 
 
@@ -141,7 +144,7 @@
 		}
 
 		function stop() {
-			spectogramHistory = new ImageData(1, 1)
+			if (spectogramHistory) spectogramHistory.clear()
 			player.stop()
 			started = Infinity;
 		}
